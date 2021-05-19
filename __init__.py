@@ -20,6 +20,7 @@ def init(app):
     from starlette.responses import HTMLResponse, RedirectResponse
     from authlib.integrations.starlette_client import OAuth, OAuthError
     from .config import get_sso_config, GOOGLE_CONF_URL
+    from meerschaum import get_connector
 
     prepend_path = get_sso_config('prepend')
     google_client_id = get_sso_config('google', 'id')
@@ -49,5 +50,14 @@ def init(app):
     async def google_callback(request: Request):
         token = await oauth.google.authorize_access_token(request)
         user = await oauth.google.parse_id_token(request, token)
-        return user
+
+        conn = get_connector('sql', 'wedding_s')
+        q = f"SELECT address FROM \"people-with-contact-info\" WHERE email = '{user.email}'"
+        address = conn.value(q)
+
+        response = RedirectResponse('/login_success')
+        response.set_cookie(key='login_name', value=user.name)
+        response.set_cookie(key='login_email', value=user.email)
+        response.set_cookie(key='login_address', value=address)
+        return response
 
