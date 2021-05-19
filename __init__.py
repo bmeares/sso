@@ -14,14 +14,13 @@ from starlette.requests import Request
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import HTMLResponse, RedirectResponse
 from authlib.integrations.starlette_client import OAuth, OAuthError
-from .config import get_sso_config
+from .config import get_sso_config, GOOGLE_CONF_URL
 
 prepend_path = get_sso_config('prepend')
 google_client_id = get_sso_config('google', 'id')
 google_client_secret = get_sso_config('google', 'secret')
 google_callback_url = get_sso_config('google', 'callback')
 
-GOOGLE_CONF_URL = 'https://accounts.google.com/.well-known/openid-configuration'
 oauth = OAuth()
 oauth.register(
     name='google',
@@ -40,25 +39,12 @@ sso_google_path = prepend_path + '/sso/google'
 
 @app.get(sso_google_path)
 async def login_sso(request: Request):
-    #  redirect_uri = sso_google_path + '/callback'
     redirect_uri = google_callback_url
-    print(redirect_uri)
     return await oauth.google.authorize_redirect(request, redirect_uri)
-    #  return await google_sso.get_login_redirect()
 
 @app.get(sso_google_path + '/callback')
 async def google_callback(request: Request):
-    #  print(request.cookies)
-    #  user = await google_sso.verify_and_process(request)
     token = await oauth.google.authorize_access_token(request)
     user = await oauth.google.parse_id_token(request, token)
     return user
-    #  return {'message' : 'success!'}
-    #  return {
-        #  "id": user.id,
-        #  "picture": user.picture,
-        #  "display_name": user.display_name,
-        #  "email": user.email,
-        #  "provider": user.provider,
-    #  }
 
