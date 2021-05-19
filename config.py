@@ -9,7 +9,7 @@ GOOGLE_CONF_URL = 'https://accounts.google.com/.well-known/openid-configuration'
 
 def get_sso_config(*args, **kw):
     _cf = get_plugin_config(*args, warn=False, **{k:v for k in kw if k != 'warn'})
-    if not _cf:
+    if _cf is None:
         _prepend = prompt('Prepend path to /sso (blank for the root to be /sso):')
         _id = prompt('Google Client ID:')
         _secret = prompt('Google Client Secret:', is_password=True)
