@@ -7,18 +7,18 @@ Meerschaum plugin to add SSO login functionality to the API.
 """
 
 __version__ = '0.0.1'
-required = ['authlib', 'httpx',]
+required = ['authlib', 'httpx', 'sqlalchemy',]
 from meerschaum.plugins import api_plugin
-from typing import Union
+from typing import Union, Optional
 
 @api_plugin
 def init(app):
     import json
     import hashlib
     from urllib.parse import quote
-    from typing import Optional
     from fastapi import FastAPI, Response, Cookie, Header
     import httpx
+    import sqlalchemy
     from starlette.config import Config
     from starlette.requests import Request
     from starlette.middleware.sessions import SessionMiddleware
@@ -27,6 +27,7 @@ def init(app):
     from .config import get_sso_config, GOOGLE_CONF_URL, FACEBOOK_CONF_DICT
     from meerschaum import get_connector
     from meerschaum.api import get_uvicorn_config
+    from meerschaum.connectors.sql._tools import get_sqlalchemy_table
 
     canonical_host = get_sso_config('canonical_hostname')
     prepend_path = get_sso_config('prepend')
@@ -36,6 +37,16 @@ def init(app):
     facebook_app_id = get_sso_config('facebook', 'id')
     facebook_app_secret = get_sso_config('facebook', 'secret')
     facebook_callback_slug = get_sso_config('facebook', 'callback')
+    db_label = get_sso_config('db_label')
+    conn = get_connector('sql', db_label)
+    tables = {
+        'people': get_sqlalchemy_table('people', connector=conn),
+        'people-with-contact-info': get_sqlalchemy_table(
+            'people-with-contact-info', connector=conn
+        ),
+        'session': get_sqlalchemy_table('session', connector=conn),
+        'contact_info': get_sqlalchemy_table('contact_info', connector=conn),
+    }
 
     oauth = OAuth()
     oauth.register(
@@ -67,34 +78,38 @@ def init(app):
         """
         Return a physical address linked to an email address.
         """
-        conn = get_connector('sql', 'wedding_s')
-        q = f"SELECT address FROM \"people-with-contact-info\" WHERE email = '{email}'"
+        #  q = f"SELECT address FROM \"people-with-contact-info\" WHERE email = '{email}'"
+        t = tables['people-with-contact-info']
+        q = sqlalchemy.select([t.c.address]).where(t.c.email == email)
         return conn.value(q)
 
     def get_email_from_name(name: str) -> Union[str, None]:
         """
         Return an email address from a real name.
         """
-        conn = get_connector('sql', 'wedding_s')
         fname = name.split(' ')[0]
         lname = ' '.join(name.split(' ')[1:])
-        q = (
-            "SELECT first, last, id FROM people "
-            + f"WHERE first = '{fname}' AND last = '{lname}'"
+        #  q = (
+            #  "SELECT first, last, id FROM people "
+            #  + f"WHERE first = '{fname}' AND last = '{lname}'"
+        #  )
+        t = tables['people']
+        q = sqlalchemy.select([t.c.first, t.c.last, t.c.id]).where(
+            t.c.first == fname and t.c.last = lname
         )
-        print(q)
+        print(str(q))
 
-        if(conn.value(q) == None or True):
+        if conn.value(q) is None or True:
             fakeemail = fname + lname + '@mazlinandaaron.com'
             return fakeemail
 
         return conn.value(q)
 
-    def get_host_from_referer(referer: Union[str, None]):
+    def get_host_from_referer(referer: Optional[str]) -> str:
         """
         Parse the host section of a url from a full url referer.
         """
-        if referer == None:
+        if referer is None:
             return canonical_host
         redirect_full_uri = ':'.join(str(referer).split(':')[0:2]) 
         redirect_base_uri = '/'.join(redirect_full_uri.split('/')[0:3])
@@ -102,16 +117,18 @@ def init(app):
 
     def record_login_hash(name: str, email: str):
         """
-        Record the current login checksum to the database for validation calls later
+        Record the current login checksum to the database for validation calls later.
         """
-        conn = get_connector('sql', 'wedding_s')
         pattern = f'{quote(name)}TO{quote(email)}INTO{canonical_host}'
         print(pattern)
         result = hashlib.md5(pattern.encode()).hexdigest()
 
-        login_exists = conn.value(f'SELECT * FROM session WHERE key="{result}"')
-        if login_exists == None:
-            conn.value(f'INSERT INTO session (key, login_email) VALUES("{result}", "{email}")')
+        t = tables['session']
+        q = sqlalchemy.select([t.c.login_email]).where(t.c.key == result)
+        login_exists = conn.value(q) is not None
+        if not login_exists:
+            q = sqlalchemy.insert(t).values({'key': result, 'login_email': email})
+            conn.exec(q)
             print(f'inserted key for user at {email}')
 
         return result
@@ -157,7 +174,10 @@ def init(app):
         token = await oauth.facebook.authorize_access_token(request)
         access_token = token.get('access_token', None)
         async with httpx.AsyncClient() as client:
-            r = await client.get('https://graph.facebook.com/me?fields=id,name,email', params={'access_token': access_token})
+            r = await client.get(
+                'https://graph.facebook.com/me?fields=id,name,email',
+                params={'access_token': access_token}
+            )
         name_verified = True
         email_verified = False
 

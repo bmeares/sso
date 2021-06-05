@@ -19,6 +19,7 @@ FACEBOOK_CONF_DICT = {
 def get_sso_config(*args, **kw):
     _cf = get_plugin_config(*args, warn=False, **{k:v for k in kw if k != 'warn'})
     if _cf is None:
+        _db_label = prompt('Wedding database label:', default='wedding_s')
         _prepend = prompt('Prepend path to /sso (blank for the root to be /sso):')
         _google_id = prompt('Google Client ID:')
         _google_secret = prompt('Google Client Secret:', is_password=True)
